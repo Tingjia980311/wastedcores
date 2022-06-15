@@ -41,5 +41,5 @@ int main (void) {
 
     timersub(&tval_after, &tval_before, &tval_result);
 
-    printf("Time elapsed: %ld.%06ld\n", (long int)tval_result.tv_sec, (long int)tval_result.tv_usec);
+    printf("writing to cpuset.cpus file using : %ld.%06ld seconds\n", (long int)tval_result.tv_sec, (long int)tval_result.tv_usec);
 }
