@@ -4,9 +4,8 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-int main (void) {
+int main (int argc, char *argv[]) {
 
-    // int ret = system("pgrep -u Tingjia -f python3");
     FILE *fp;
     char cmd_mount[] = "echo ";
     char path[1035];
@@ -32,11 +31,17 @@ int main (void) {
     system("sudo insmod sched_profiler.ko");
 
     gettimeofday(&tval_before, NULL);
-    system("echo 0-4  > /sys/fs/cgroup/cpuset/test/cpuset.cpus");
+    system("echo 0-39  > /sys/fs/cgroup/cpuset/test/cpuset.cpus");
     gettimeofday(&tval_after, NULL);
 
     sleep(1);
-    system("cat /proc/sched_profiler > output");
+    char cmd_output[] = "cat /proc/sched_profiler > ";
+    strcat(cmd_output, "output_");
+    strcat(cmd_output, argv[1]);
+    strcat(cmd_output, "_");
+    strcat(cmd_output, argv[2]);
+    
+    system(cmd_output);
     system("sudo rmmod sched_profiler.ko");
 
     timersub(&tval_after, &tval_before, &tval_result);

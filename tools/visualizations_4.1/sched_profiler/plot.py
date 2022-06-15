@@ -1,6 +1,10 @@
-with open('output_5', 'r') as f:
-    lines = f.readlines()
+import sys
+cpu_n = sys.argv[1]
+file_id = sys.argv[2]
 
+with open('output_' + str(cpu_n) + '_' + str(file_id), 'r') as f:
+    lines = f.readlines()
+num_cpu = 64
 schedule_times = []
 runqlens = {}
 start_t = 0
@@ -9,10 +13,10 @@ for l in lines:
     while('' in datas):
         datas.remove('')
     if len(schedule_times) == 0:
-        start_t = int(datas[5])
-    if datas[0] == '-1': datas[0] = '5'
-    runqlens[int(datas[5]) - start_t] = [int(runqlen) for runqlen in datas[0:5]]
-    schedule_times.append(int(datas[5]) - start_t)
+        start_t = int(datas[num_cpu])
+    if datas[0] == '-1': datas[0] = 0
+    runqlens[int(datas[num_cpu]) - start_t] = [int(runqlen) for runqlen in datas[0:num_cpu]]
+    schedule_times.append(int(datas[num_cpu]) - start_t)
 
 
 split_times = {}
@@ -66,11 +70,14 @@ import numpy as np
 # import heatmap
 import seaborn as sns;
 
+
 cpu_qlens_matrix = np.array(cpu_qlens_matrix)
 cpu_qlens_matrix = np.transpose(cpu_qlens_matrix)
+cpu_list = [0,1,2,3]
+cpu_qlens_matrix = cpu_qlens_matrix[cpu_list,:300]
 print(cpu_qlens_matrix.shape)
 sns.set(rc = {'figure.figsize':(40, 8)}, font_scale=1.8)
 ax = sns.heatmap(cpu_qlens_matrix, cmap="Blues")
-plt.savefig("output.png")
+plt.savefig("output_" + cpu_n + "_" + file_id + ".png")
 
 

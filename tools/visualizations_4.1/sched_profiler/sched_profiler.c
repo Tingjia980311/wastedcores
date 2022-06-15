@@ -221,7 +221,7 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 			entry->data.load_sample.load;
 	}
 
-	for (i = 0; i < num_online_cpus(); i++)
+	for (i = 0; i < MAX_CPUS; i++)
 		seq_printf(m, "%4d", rq_size[i]);
 
 	seq_printf(m, "	 %llu nsecs", entry->sched_clock);
