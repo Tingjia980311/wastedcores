@@ -32,7 +32,7 @@ int main (void) {
     system("sudo insmod sched_profiler.ko");
 
     gettimeofday(&tval_before, NULL);
-    system("echo 0-39  > /sys/fs/cgroup/cpuset/test/cpuset.cpus");
+    system("echo 0-4  > /sys/fs/cgroup/cpuset/test/cpuset.cpus");
     gettimeofday(&tval_after, NULL);
 
     sleep(1);

@@ -1,4 +1,4 @@
-with open('output', 'r') as f:
+with open('output_5', 'r') as f:
     lines = f.readlines()
 
 schedule_times = []
@@ -9,10 +9,10 @@ for l in lines:
     while('' in datas):
         datas.remove('')
     if len(schedule_times) == 0:
-        start_t = int(datas[40])
-    if datas[0] == '-1': datas[0] = '40'
-    runqlens[int(datas[40]) - start_t] = [int(runqlen) for runqlen in datas[0:40]]
-    schedule_times.append(int(datas[40]) - start_t)
+        start_t = int(datas[5])
+    if datas[0] == '-1': datas[0] = '5'
+    runqlens[int(datas[5]) - start_t] = [int(runqlen) for runqlen in datas[0:5]]
+    schedule_times.append(int(datas[5]) - start_t)
 
 
 split_times = {}
