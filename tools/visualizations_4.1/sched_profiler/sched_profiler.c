@@ -19,7 +19,7 @@
 /******************************************************************************/
 /* Constants								      */
 /******************************************************************************/
-#define MAX_CPUS							      64
+#define MAX_CPUS							      40
 #define MAX_CLOCK_STR_LENGTH						      32
 #define MAX_SAMPLE_ENTRIES						10000000
 #define INITIAL_CPU_ARRAY						       \
@@ -27,25 +27,7 @@
 		  -1, -1, -1, -1, -1, -1, -1, -1,			       \
 		  -1, -1, -1, -1, -1, -1, -1, -1,			       \
 		  -1, -1, -1, -1, -1, -1, -1, -1,			       \
-		  -1, -1, -1, -1, -1, -1, -1, -1,			       \
-		  -1, -1, -1, -1, -1, -1, -1, -1,			       \
-		  -1, -1, -1, -1, -1, -1, -1, -1,			       \
 		  -1, -1, -1, -1, -1, -1, -1, -1 }
-
-enum {
-	SP_SCHED_EXEC = 0,
-	SP_TRY_TO_WAKE_UP,
-	SP_WAKE_UP_NEW_TASK,
-	SP_IDLE_BALANCE,
-	SP_REBALANCE_DOMAINS,
-	SP_MOVE_TASKS = 10,
-	SP_ACTIVE_LOAD_BALANCE_CPU_STOP = 20,
-	SP_CONSIDERED_CORES_SIS = 200,
-	SP_CONSIDERED_CORES_USLS,
-	SP_CONSIDERED_CORES_FBQ,
-	SP_CONSIDERED_CORES_FIG,
-	SP_CONSIDERED_CORES_FIC
-};
 
 /******************************************************************************/
 /* Kernel declarations							      */
@@ -77,10 +59,19 @@ struct rq {
 /******************************************************************************/
 enum {
 	RQ_SIZE_SAMPLE = 0,
-	SCHEDULING_SAMPLE,
-	SCHEDULING_SAMPLE_EXTRA,
-	BALANCING_SAMPLE,
-	LOAD_SAMPLE
+	LOAD_SAMPLE,
+	LOAD_BALANCE_SAMPLE,
+	FILE_WRITING_SAMPLE,
+	CPUALLOWED_SAMPLE,
+	REBALANCE_SAMPLE,
+	DOMAINCPU_SAMPLE,
+	IDLE_BALANCE_SAMPLE,
+	HOTCAHCE_SAMPLE,
+	DOMAIN_FLAG_SAMPLE,
+	DOMIAN_INTERVAL_SAMPLE,
+	CGROUP_CPUMASK_SAMPLE,
+	START_MIGRATION_SAMPLE,
+	END_MIGRATION_SAMPLE
 };
 
 typedef struct sample_entry {
@@ -91,22 +82,45 @@ typedef struct sample_entry {
 			unsigned char nr_running, dst_cpu;
 		} rq_size_sample;
 		struct {
-			unsigned char event_type, src_cpu, dst_cpu;
-		} scheduling_sample;
-#ifdef WITH_SCHEDULING_SAMPLE_EXTRA
-		struct {
-			unsigned char event_type, data1, data2, data3, data4,
-				      data5, data6, data7, data8;
-		} scheduling_sample_extra;
-#endif
-		struct {
-			unsigned char event_type, cpu, current_cpu;
-			uint64_t data;
-		} balancing_sample;
-		struct {
 			unsigned long load;
 			unsigned char cpu;
 		} load_sample;
+		struct {
+			unsigned char src_cpu, dst_cpu, ld_moved;
+		} load_balance_sample;
+		struct {
+		} file_writing_sample;
+		struct {
+			unsigned char cpu;
+		} cpu_allowed_sample;
+		struct {
+			unsigned char cpu, level, r;
+		} rebalance_sample;
+		struct {
+			unsigned char cpu;
+		} domain_sample;
+		struct {
+			unsigned char src_cpu, dst_cpu;
+		} hotcache_sample;
+		struct {
+			unsigned char cpu, pulled_task;
+		} idle_balance_sample;
+		struct {
+			unsigned char cpu, level, flag;
+		} domain_flag_sample;
+		struct {
+			unsigned char cpu, level;
+			unsigned int interval;
+		} domain_interval_sample;
+		struct {
+			unsigned char cpu;
+		} cgroup_cpumask_sample;
+		struct {
+			unsigned char src_cpu, dst_cpu;
+		} start_migration_sample;
+		struct {
+			unsigned char src_cpu, dst_cpu, ld_moved;
+		} end_migration_sample;
 	} data;
 } sample_entry_t;
 
@@ -117,15 +131,20 @@ unsigned long n_sample_entries = 0;
 /******************************************************************************/
 /* Hook function types							      */
 /******************************************************************************/
-//typedef void (*set_nr_running_t)(unsigned long int*, unsigned long int, int);
 typedef void (*set_nr_running_t)(int*, int, int);
-typedef void (*record_scheduling_event_t)(int, int, int);
-#ifdef WITH_SCHEDULING_SAMPLE_EXTRA
-typedef void (*record_scheduling_event_extra_t)(int, char, char, char, char,
-						char, char, char, char);
-#endif
-typedef void (*record_balancing_event_t)(int, int, uint64_t);
 typedef void (*record_load_change_t)(unsigned long, int);
+typedef void (*record_load_balance_t)(int, int, int);
+typedef void (*record_file_writing_t)(void);
+typedef void (*record_cpuallowed_change_t)(int);
+typedef void (*record_rebalance_t)(int,int,int);
+typedef void (*record_sd_cpus_t)(int);
+typedef void (*record_hotcache_reject_t)(int,int);
+typedef void (*record_idle_balance_t)(int, int);
+typedef void (*record_sd_flag_t)(int, int, int);
+typedef void (*record_sd_interval_t)(int, int, unsigned int);
+typedef void (*record_cgroup_cpumask_t)(int);
+typedef void (*record_start_migration_t)(int, int);
+typedef void (*record_end_migration_t)(int, int, int);
 
 /******************************************************************************/
 /* Prototypes								      */
@@ -135,6 +154,30 @@ extern void set_sp_module_set_nr_running
 	(set_nr_running_t __sp_module_set_nr_running);
 extern void set_sp_module_record_load_change
 	(record_load_change_t __sp_module_record_load_change);
+extern void set_sp_module_record_load_balance
+	(record_load_balance_t __sp_module_record_load_balance);
+extern void set_sp_module_record_file_writing
+	(record_file_writing_t __sp_module_record_file_writing);
+extern void set_sp_module_record_cpuallowed_change
+	(record_cpuallowed_change_t __sp_module_record_cpuallowed_change);
+extern void set_sp_module_record_rebalance
+	(record_rebalance_t __sp_module_record_rebalance);
+extern void set_sp_module_record_sd_cpus
+	(record_sd_cpus_t __sp_module_record_sd_cpus);
+extern void set_sp_module_record_hotcache_rej
+	(record_hotcache_reject_t __sp_module_record_hotcahe_rej);
+extern void set_sp_module_record_idle_balance
+	(record_idle_balance_t __sp_module_record_idle_balance);
+extern void set_sp_module_record_sd_flag
+	(record_sd_flag_t __sp_module_record_sd_flag);
+extern void set_sp_module_record_sd_interval
+	(record_sd_interval_t __sp_module_record_sd_interval);
+extern void set_sp_module_record_cgroup_cpumask
+	(record_cgroup_cpumask_t __sp_module_record_cgroup_cpumask);
+extern void set_sp_module_record_start_migration
+	(record_start_migration_t __sp_module_record_start_migration);
+extern void set_sp_module_record_end_migration
+	(record_end_migration_t __sp_module_record_end_migration);
 
 static void rq_stats_do_work(struct seq_file *m, unsigned long iteration);
 
@@ -221,13 +264,16 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 			entry->data.load_sample.load;
 	}
 
-	for (i = 0; i < MAX_CPUS; i++)
-		seq_printf(m, "%4d", rq_size[i]);
+	if (entry->entry_type == RQ_SIZE_SAMPLE)
+	{
+		for (i = 0; i < MAX_CPUS; i++)
+			seq_printf(m, "%4d", rq_size[i]);
+	}
 
 	seq_printf(m, "	 %llu nsecs", entry->sched_clock);
 
 	if (entry->entry_type == RQ_SIZE_SAMPLE)
-	{
+	{		
 		seq_printf(m, " RQ %4d %4d", entry->data.rq_size_sample.dst_cpu,
 			   entry->data.rq_size_sample.nr_running);
 	}
@@ -236,13 +282,65 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 		seq_printf(m, " LD %4d %12ld", entry->data.load_sample.cpu,
 			   entry->data.load_sample.load);
 	}
+	else if (entry->entry_type == LOAD_BALANCE_SAMPLE)
+	{
+		seq_printf(m, " LB %4d %4d %4d", entry->data.load_balance_sample.src_cpu,
+			   entry->data.load_balance_sample.dst_cpu, 
+			   entry->data.load_balance_sample.ld_moved);
+	}
+	else if (entry->entry_type == FILE_WRITING_SAMPLE)
+	{
+		seq_printf(m, " WF");
+	}
+	else if (entry->entry_type == CPUALLOWED_SAMPLE)
+	{
+		seq_printf(m, " CC %4d", entry->data.cpu_allowed_sample.cpu);
+	}
+	else if (entry->entry_type == REBALANCE_SAMPLE)
+	{
+		seq_printf(m, " RB %4d %4d %4d", entry->data.rebalance_sample.cpu, 
+				entry->data.rebalance_sample.level, entry->data.rebalance_sample.r);
+	}
+	else if (entry->entry_type == DOMAINCPU_SAMPLE)
+	{
+		seq_printf(m, " DOMAIN_RB %4d", entry->data.domain_sample.cpu);
+	}
+	else if (entry->entry_type == HOTCAHCE_SAMPLE)
+	{
+		seq_printf(m, " HOTCACHE %4d %4d", entry->data.hotcache_sample.src_cpu, 
+				entry->data.hotcache_sample.dst_cpu);
+	}
+	else if (entry->entry_type == IDLE_BALANCE_SAMPLE)
+	{
+		seq_printf(m, " IDLE_BALANCE %4d %4d", entry->data.idle_balance_sample.cpu,
+				entry->data.idle_balance_sample.pulled_task);
+	}
+	else if (entry->entry_type == DOMAIN_FLAG_SAMPLE)
+	{
+		seq_printf(m, " FLAG %4d %4d %4d", entry->data.domain_flag_sample.cpu,
+				entry->data.domain_flag_sample.level, entry->data.domain_flag_sample.flag);
+	}
+	else if (entry->entry_type == DOMIAN_INTERVAL_SAMPLE)
+	{
+		seq_printf(m, " INTERVAL %4d %4d %12u", entry->data.domain_interval_sample.cpu,
+				entry->data.domain_interval_sample.level, entry->data.domain_interval_sample.interval);
+	}
+	else if (entry->entry_type == CGROUP_CPUMASK_SAMPLE)
+	{
+		seq_printf(m, " CPUMASK %4d", entry->data.cgroup_cpumask_sample.cpu);
+	}
+	else if (entry->entry_type == START_MIGRATION_SAMPLE)
+	{
+		seq_printf(m, " START_M %4d %4d", entry->data.start_migration_sample.src_cpu,
+				entry->data.start_migration_sample.dst_cpu);
+	}
+	else if (entry->entry_type == END_MIGRATION_SAMPLE)
+	{
+		seq_printf(m, " END_M %4d %4d %4d", entry->data.end_migration_sample.src_cpu,
+				entry->data.end_migration_sample.dst_cpu, entry->data.end_migration_sample.ld_moved);
+	}
 
 	seq_printf(m, "\n");
-
-	/* TODO: Rewrite using this format to improve performance? */
-
-//	seq_printf(m, "%u %u\n", rq_size_sample_entries[iteration].nr_running,
-//		   rq_size_sample_entries[iteration].dst_cpu);
 }
 
 //void sched_profiler_set_nr_running(unsigned long int *nr_running_p,
@@ -262,6 +360,18 @@ void sched_profiler_set_nr_running(int *nr_running_p, int new_nr_running,
 	{
 		set_sp_module_set_nr_running(NULL);
 		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
 		return;
 	}
 
@@ -275,7 +385,6 @@ void sched_profiler_set_nr_running(int *nr_running_p, int new_nr_running,
 		.dst_cpu = (unsigned char)dst_cpu;
 }
 
-
 void sched_profiler_record_load_change(unsigned long load, int cpu)
 {
 	unsigned long __current_sample_entry_id;
@@ -287,11 +396,20 @@ void sched_profiler_record_load_change(unsigned long load, int cpu)
 	{
 		set_sp_module_set_nr_running(NULL);
 		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
 		return;
 	}
-
-	sample_entries[__current_sample_entry_id]
-		 .entry_type = LOAD_SAMPLE;
 
 	sample_entries[__current_sample_entry_id]
 		 .sched_clock = ktime_get_mono_fast_ns();
@@ -301,6 +419,432 @@ void sched_profiler_record_load_change(unsigned long load, int cpu)
 		 .load = load;
 	sample_entries[__current_sample_entry_id].data.load_sample
 		 .cpu = (unsigned char)cpu;
+}
+
+void sched_profiler_record_load_balance(int src_cpu, int dst_cpu, int ld_moved)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id =
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+	
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+	}
+
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = LOAD_BALANCE_SAMPLE;
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id].data.load_balance_sample
+		 .src_cpu = src_cpu;
+	sample_entries[__current_sample_entry_id].data.load_balance_sample
+		 .dst_cpu = dst_cpu;
+	sample_entries[__current_sample_entry_id].data.load_balance_sample
+		 .ld_moved = ld_moved;
+	
+}
+
+void sched_profiler_record_file_writing(void)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = FILE_WRITING_SAMPLE;
+}
+
+void sched_profiler_record_cpuallowed_change(int cpu)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = CPUALLOWED_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.cpu_allowed_sample
+		 .cpu = cpu;
+}
+
+void sched_profiler_record_rebalance(int cpu, int level, int r)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = REBALANCE_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.rebalance_sample
+		 .cpu = cpu;
+	sample_entries[__current_sample_entry_id].data.rebalance_sample
+		 .level = level;
+	sample_entries[__current_sample_entry_id].data.rebalance_sample
+		 .r = r;
+
+}
+
+void sched_profiler_record_sd_cpus(int cpu)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = DOMAINCPU_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.domain_sample
+		 .cpu = cpu;
+}
+
+void sched_profiler_record_hotcache_rej(int src_cpu, int dst_cpu)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = HOTCAHCE_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.hotcache_sample
+		 .src_cpu = src_cpu;
+	sample_entries[__current_sample_entry_id].data.hotcache_sample
+		 .dst_cpu = dst_cpu;
+		
+}
+
+void sched_profiler_record_idle_balance(int cpu, int pulled_task)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = IDLE_BALANCE_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.idle_balance_sample
+		 .cpu = cpu;
+	sample_entries[__current_sample_entry_id].data.idle_balance_sample
+		 .pulled_task = pulled_task;
+}
+
+void sched_profiler_record_sd_flag(int cpu, int level, int flag)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = DOMAIN_FLAG_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.domain_flag_sample
+		 .cpu = cpu;
+	sample_entries[__current_sample_entry_id].data.domain_flag_sample
+		 .level = level;
+	sample_entries[__current_sample_entry_id].data.domain_flag_sample
+		 .flag = flag;
+}
+
+void sched_profiler_record_sd_interval(int cpu, int level, unsigned int interval)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = DOMIAN_INTERVAL_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.domain_interval_sample
+		 .cpu = cpu;
+	sample_entries[__current_sample_entry_id].data.domain_interval_sample
+		 .level = level;
+	sample_entries[__current_sample_entry_id].data.domain_interval_sample
+		 .interval = interval;
+}
+
+void sched_profiler_record_cgroup_cpumask(int cpu)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = CGROUP_CPUMASK_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.cgroup_cpumask_sample
+		 .cpu = cpu;
+}
+
+void sched_profiler_record_start_migration(int src_cpu, int dst_cpu)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = START_MIGRATION_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.start_migration_sample
+		 .src_cpu = src_cpu;
+	sample_entries[__current_sample_entry_id].data.start_migration_sample
+		 .dst_cpu = dst_cpu;
+}
+
+void sched_profiler_record_end_migration(int src_cpu, int dst_cpu, int ld_moved)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = END_MIGRATION_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.end_migration_sample
+		 .src_cpu = src_cpu;
+	sample_entries[__current_sample_entry_id].data.end_migration_sample
+		 .dst_cpu = dst_cpu;
+	sample_entries[__current_sample_entry_id].data.end_migration_sample
+		 .ld_moved = ld_moved;
 }
 
 int init_module(void)
@@ -321,6 +865,18 @@ int init_module(void)
 
 	set_sp_module_set_nr_running(sched_profiler_set_nr_running);
 	set_sp_module_record_load_change(NULL);
+	set_sp_module_record_load_balance(sched_profiler_record_load_balance);
+	set_sp_module_record_file_writing(sched_profiler_record_file_writing);
+	set_sp_module_record_cpuallowed_change(sched_profiler_record_cpuallowed_change);
+	set_sp_module_record_rebalance(sched_profiler_record_rebalance);
+	set_sp_module_record_sd_cpus(sched_profiler_record_sd_cpus);
+	set_sp_module_record_hotcache_rej(sched_profiler_record_hotcache_rej);
+	set_sp_module_record_idle_balance(sched_profiler_record_idle_balance);
+	set_sp_module_record_sd_flag(sched_profiler_record_sd_flag);
+	set_sp_module_record_sd_interval(sched_profiler_record_sd_interval);
+	set_sp_module_record_cgroup_cpumask(sched_profiler_record_cgroup_cpumask);
+	set_sp_module_record_start_migration(sched_profiler_record_start_migration);
+	set_sp_module_record_end_migration(sched_profiler_record_end_migration);
 
 	return 0;
 }
@@ -329,6 +885,18 @@ void cleanup_module(void)
 {
 	set_sp_module_set_nr_running(NULL);
 	set_sp_module_record_load_change(NULL);
+	set_sp_module_record_load_balance(NULL);
+	set_sp_module_record_file_writing(NULL);
+	set_sp_module_record_cpuallowed_change(NULL);
+	set_sp_module_record_rebalance(NULL);
+	set_sp_module_record_sd_cpus(NULL);
+	set_sp_module_record_hotcache_rej(NULL);
+	set_sp_module_record_idle_balance(NULL);
+	set_sp_module_record_sd_flag(NULL);
+	set_sp_module_record_sd_interval(NULL);
+	set_sp_module_record_cgroup_cpumask(NULL);
+	set_sp_module_record_start_migration(NULL);
+	set_sp_module_record_end_migration(NULL);
 
 	ssleep(1);
 
