@@ -25,7 +25,7 @@ int main (int argc, char *argv[]) {
     }
     pclose(fp);
     struct timeval tval_before, tval_after, tval_result;
-    system("echo 20 > /sys/fs/cgroup/cpuset/test/cpuset.cpus");
+    system("echo 0 > /sys/fs/cgroup/cpuset/test/cpuset.cpus");
     sleep(1);
 
     system("sudo insmod sched_profiler.ko");
