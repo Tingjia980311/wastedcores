@@ -71,7 +71,10 @@ enum {
 	DOMIAN_INTERVAL_SAMPLE,
 	CGROUP_CPUMASK_SAMPLE,
 	START_MIGRATION_SAMPLE,
-	END_MIGRATION_SAMPLE
+	END_MIGRATION_SAMPLE,
+	BUSIEST_SAMPLE,
+	DETACH_STATUS_SAMPLE,
+	DETACH_LOAD_SAMPLE
 };
 
 typedef struct sample_entry {
@@ -82,6 +85,7 @@ typedef struct sample_entry {
 			unsigned char nr_running, dst_cpu;
 		} rq_size_sample;
 		struct {
+			int flag;
 			unsigned long load;
 			unsigned char cpu;
 		} load_sample;
@@ -121,6 +125,18 @@ typedef struct sample_entry {
 		struct {
 			unsigned char src_cpu, dst_cpu, ld_moved;
 		} end_migration_sample;
+		struct {
+			int flag;
+			unsigned char cpu;
+		} busiest_sample;
+		struct {
+			unsigned char cpu;
+			unsigned int loop, loop_max, loop_break;
+			long imbalance;
+		} detach_status_sample;
+		struct {
+			unsigned long load;
+		} detach_load_sample;
 	} data;
 } sample_entry_t;
 
@@ -132,7 +148,7 @@ unsigned long n_sample_entries = 0;
 /* Hook function types							      */
 /******************************************************************************/
 typedef void (*set_nr_running_t)(int*, int, int);
-typedef void (*record_load_change_t)(unsigned long, int);
+typedef void (*record_load_change_t)(int, unsigned long, int);
 typedef void (*record_load_balance_t)(int, int, int);
 typedef void (*record_file_writing_t)(void);
 typedef void (*record_cpuallowed_change_t)(int);
@@ -145,6 +161,10 @@ typedef void (*record_sd_interval_t)(int, int, unsigned int);
 typedef void (*record_cgroup_cpumask_t)(int);
 typedef void (*record_start_migration_t)(int, int);
 typedef void (*record_end_migration_t)(int, int, int);
+typedef void (*record_busiest_t)(int, int);
+typedef void (*record_detach_status_t)(int, unsigned int, unsigned int, unsigned int, long);
+typedef void (*record_detach_load_t)(unsigned long);
+
 
 /******************************************************************************/
 /* Prototypes								      */
@@ -178,6 +198,12 @@ extern void set_sp_module_record_start_migration
 	(record_start_migration_t __sp_module_record_start_migration);
 extern void set_sp_module_record_end_migration
 	(record_end_migration_t __sp_module_record_end_migration);
+extern void set_sp_module_record_busiest
+	(record_busiest_t __sp_module_record_busiest);
+extern void set_sp_module_record_detach_status
+	(record_detach_status_t __sp_module_record_detach_status);
+extern void set_sp_module_record_detach_load
+	(record_detach_load_t __sp_module_record_detach_load);
 
 static void rq_stats_do_work(struct seq_file *m, unsigned long iteration);
 
@@ -243,6 +269,7 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 	sample_entry_t *entry;
 	static unsigned int rq_size[MAX_CPUS] = INITIAL_CPU_ARRAY;
 	static unsigned long load[MAX_CPUS] = INITIAL_CPU_ARRAY;
+	static unsigned long avg_cfs_load[MAX_CPUS] = INITIAL_CPU_ARRAY;
 
 	set_sp_module_set_nr_running(NULL);
 	set_sp_module_record_load_change(NULL);
@@ -260,14 +287,29 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 	}
 	else if (entry->entry_type == LOAD_SAMPLE)
 	{
-		load[entry->data.load_sample.cpu] =
-			entry->data.load_sample.load;
+		if (entry->data.load_sample.flag == 0)
+			load[entry->data.load_sample.cpu] =
+				entry->data.load_sample.load;
+		if (entry->data.load_sample.flag == 1)
+			avg_cfs_load[entry->data.load_sample.cpu] = 
+				entry->data.load_sample.load;
 	}
 
 	if (entry->entry_type == RQ_SIZE_SAMPLE)
 	{
 		for (i = 0; i < MAX_CPUS; i++)
 			seq_printf(m, "%4d", rq_size[i]);
+	}
+	if (entry->entry_type == LOAD_SAMPLE)
+	{	
+		if (entry->data.load_sample.flag == 0){
+			for (i = 0; i < MAX_CPUS; i++)
+				seq_printf(m, "%12ld", load[i]);
+		} else if (entry->data.load_sample.flag == 1) {
+			for (i = 0; i < MAX_CPUS; i++)
+				seq_printf(m, "%12ld", avg_cfs_load[i]);
+		}
+		
 	}
 
 	seq_printf(m, "	 %llu nsecs", entry->sched_clock);
@@ -279,7 +321,7 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 	}
 	else if (entry->entry_type == LOAD_SAMPLE)
 	{
-		seq_printf(m, " LD %4d %12ld", entry->data.load_sample.cpu,
+		seq_printf(m, " LD %4d %4d %12ld", entry->data.load_sample.flag, entry->data.load_sample.cpu,
 			   entry->data.load_sample.load);
 	}
 	else if (entry->entry_type == LOAD_BALANCE_SAMPLE)
@@ -339,6 +381,20 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 		seq_printf(m, " END_M %4d %4d %4d", entry->data.end_migration_sample.src_cpu,
 				entry->data.end_migration_sample.dst_cpu, entry->data.end_migration_sample.ld_moved);
 	}
+	else if (entry->entry_type == BUSIEST_SAMPLE)
+	{
+		seq_printf(m, " BS %4d %4d", entry->data.busiest_sample.flag, entry->data.busiest_sample.cpu);
+	}
+	else if (entry->entry_type == DETACH_STATUS_SAMPLE)
+	{
+		seq_printf(m, " DETACH_STAT %4d %12u %12u %12u %12ld", entry->data.detach_status_sample.cpu,
+				entry->data.detach_status_sample.loop, entry->data.detach_status_sample.loop_max, 
+				entry->data.detach_status_sample.loop_break, entry->data.detach_status_sample.imbalance);
+	}
+	else if (entry->entry_type == DETACH_LOAD_SAMPLE)
+	{
+		seq_printf(m, " DETACH_LOAD %12ld", entry->data.detach_load_sample.load);
+	}
 
 	seq_printf(m, "\n");
 }
@@ -372,6 +428,9 @@ void sched_profiler_set_nr_running(int *nr_running_p, int new_nr_running,
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 
@@ -385,7 +444,7 @@ void sched_profiler_set_nr_running(int *nr_running_p, int new_nr_running,
 		.dst_cpu = (unsigned char)dst_cpu;
 }
 
-void sched_profiler_record_load_change(unsigned long load, int cpu)
+void sched_profiler_record_load_change(int flag, unsigned long load, int cpu)
 {
 	unsigned long __current_sample_entry_id;
 
@@ -408,6 +467,9 @@ void sched_profiler_record_load_change(unsigned long load, int cpu)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 
@@ -415,6 +477,8 @@ void sched_profiler_record_load_change(unsigned long load, int cpu)
 		 .sched_clock = ktime_get_mono_fast_ns();
 	sample_entries[__current_sample_entry_id]
 		 .entry_type = LOAD_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.load_sample
+		 .flag = flag;
 	sample_entries[__current_sample_entry_id].data.load_sample
 		 .load = load;
 	sample_entries[__current_sample_entry_id].data.load_sample
@@ -444,6 +508,9 @@ void sched_profiler_record_load_balance(int src_cpu, int dst_cpu, int ld_moved)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 	}
 
 	sample_entries[__current_sample_entry_id]
@@ -482,6 +549,9 @@ void sched_profiler_record_file_writing(void)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 
@@ -514,6 +584,9 @@ void sched_profiler_record_cpuallowed_change(int cpu)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 
@@ -548,6 +621,9 @@ void sched_profiler_record_rebalance(int cpu, int level, int r)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 
@@ -587,6 +663,9 @@ void sched_profiler_record_sd_cpus(int cpu)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -620,6 +699,9 @@ void sched_profiler_record_hotcache_rej(int src_cpu, int dst_cpu)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -656,6 +738,9 @@ void sched_profiler_record_idle_balance(int cpu, int pulled_task)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -691,6 +776,9 @@ void sched_profiler_record_sd_flag(int cpu, int level, int flag)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -728,6 +816,9 @@ void sched_profiler_record_sd_interval(int cpu, int level, unsigned int interval
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -765,6 +856,9 @@ void sched_profiler_record_cgroup_cpumask(int cpu)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -798,6 +892,8 @@ void sched_profiler_record_start_migration(int src_cpu, int dst_cpu)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -833,6 +929,9 @@ void sched_profiler_record_end_migration(int src_cpu, int dst_cpu, int ld_moved)
 		set_sp_module_record_cgroup_cpumask(NULL);
 		set_sp_module_record_start_migration(NULL);
 		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_status(NULL);
+		set_sp_module_record_detach_load(NULL);
 		return;
 	}
 	sample_entries[__current_sample_entry_id]
@@ -845,6 +944,121 @@ void sched_profiler_record_end_migration(int src_cpu, int dst_cpu, int ld_moved)
 		 .dst_cpu = dst_cpu;
 	sample_entries[__current_sample_entry_id].data.end_migration_sample
 		 .ld_moved = ld_moved;
+}
+
+void sched_profiler_record_busiest(int flag, int cpu)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_load(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = BUSIEST_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.busiest_sample
+		 .flag = flag;
+	sample_entries[__current_sample_entry_id].data.busiest_sample
+		 .cpu = cpu;
+}
+
+void sched_profiler_record_detach_status(int src_cpu, unsigned int loop, unsigned int loop_max, unsigned int loop_break, long imbalance)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_load(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = DETACH_STATUS_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.detach_status_sample
+		 .cpu = src_cpu;
+	sample_entries[__current_sample_entry_id].data.detach_status_sample
+		 .loop = loop;
+	sample_entries[__current_sample_entry_id].data.detach_status_sample
+		 .loop_max = loop_max;
+	sample_entries[__current_sample_entry_id].data.detach_status_sample
+		 .loop_break = loop_break;
+	sample_entries[__current_sample_entry_id].data.detach_status_sample
+		 .imbalance = imbalance;
+}
+
+void sched_profiler_record_detach_load(unsigned long load)
+{
+	unsigned long __current_sample_entry_id;
+
+	__current_sample_entry_id = 
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_set_nr_running(NULL);
+		set_sp_module_record_load_change(NULL);
+		set_sp_module_record_load_balance(NULL);
+		set_sp_module_record_file_writing(NULL);
+		set_sp_module_record_cpuallowed_change(NULL);
+		set_sp_module_record_rebalance(NULL);
+		set_sp_module_record_sd_cpus(NULL);
+		set_sp_module_record_hotcache_rej(NULL);
+		set_sp_module_record_idle_balance(NULL);
+		set_sp_module_record_sd_flag(NULL);
+		set_sp_module_record_sd_interval(NULL);
+		set_sp_module_record_cgroup_cpumask(NULL);
+		set_sp_module_record_start_migration(NULL);
+		set_sp_module_record_end_migration(NULL);
+		set_sp_module_record_busiest(NULL);
+		set_sp_module_record_detach_load(NULL);
+		return;
+	}
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = DETACH_LOAD_SAMPLE;
+	sample_entries[__current_sample_entry_id].data.detach_load_sample
+		 .load = load;
 }
 
 int init_module(void)
@@ -864,7 +1078,7 @@ int init_module(void)
 	}
 
 	set_sp_module_set_nr_running(sched_profiler_set_nr_running);
-	set_sp_module_record_load_change(NULL);
+	set_sp_module_record_load_change(sched_profiler_record_load_change);
 	set_sp_module_record_load_balance(sched_profiler_record_load_balance);
 	set_sp_module_record_file_writing(sched_profiler_record_file_writing);
 	set_sp_module_record_cpuallowed_change(sched_profiler_record_cpuallowed_change);
@@ -877,6 +1091,9 @@ int init_module(void)
 	set_sp_module_record_cgroup_cpumask(sched_profiler_record_cgroup_cpumask);
 	set_sp_module_record_start_migration(sched_profiler_record_start_migration);
 	set_sp_module_record_end_migration(sched_profiler_record_end_migration);
+	set_sp_module_record_busiest(sched_profiler_record_busiest);
+	set_sp_module_record_detach_status(sched_profiler_record_detach_status);
+	set_sp_module_record_detach_load(sched_profiler_record_detach_load);
 
 	return 0;
 }
@@ -897,6 +1114,9 @@ void cleanup_module(void)
 	set_sp_module_record_cgroup_cpumask(NULL);
 	set_sp_module_record_start_migration(NULL);
 	set_sp_module_record_end_migration(NULL);
+	set_sp_module_record_busiest(NULL);
+	set_sp_module_record_detach_status(NULL);
+	set_sp_module_record_detach_load(NULL);
 
 	ssleep(1);
 
