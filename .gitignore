@@ -11,3 +11,15 @@ tools/visualizations_4.1/sched_profiler/sched_profiler.mod.c
 tools/visualizations_4.1/sched_profiler/sched_profiler.mod.o
 tools/visualizations_4.1/sched_profiler/sched_profiler.o
 tools/visualizations_4.1/sched_profiler/venv/
+sched_wakeup/.cache.mk
+sched_wakeup/.sched_profiler.ko.cmd
+sched_wakeup/.sched_profiler.mod.o.cmd
+sched_wakeup/.sched_profiler.o.cmd
+sched_wakeup/.tmp_versions/sched_profiler.mod
+sched_wakeup/Module.symvers
+sched_wakeup/modules.order
+sched_wakeup/output
+sched_wakeup/sched_profiler.ko
+sched_wakeup/sched_profiler.mod.c
+sched_wakeup/sched_profiler.mod.o
+sched_wakeup/sched_profiler.o
