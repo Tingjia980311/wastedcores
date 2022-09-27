@@ -35,6 +35,7 @@
 enum {
 	WAKEUP_PARAS_SAMPLE = 0,
 	CPUS_ALLOWED_SAMPLE,
+	FORBID_TASK_CPU_SAMPLE
 };
 
 typedef struct sample_entry {
@@ -48,6 +49,10 @@ typedef struct sample_entry {
         struct {
             int * cpus_in_mask;
         } cpus_allowed_sample;
+		struct {
+			unsigned char ret;
+			int *newmask;
+		} forbid_task_cpu_sample;
 		
 	} data;
 } sample_entry_t;
@@ -61,6 +66,7 @@ unsigned long n_sample_entries = 0;
 /******************************************************************************/
 typedef void (*record_wakeup_paras_t)(unsigned int, int, int);
 typedef void (*record_cpus_allowed_t)(cpumask_t *, int);
+typedef void (*forbid_task_cpu_t)(struct task_struct *, int);
 
 /******************************************************************************/
 /* Prototypes								      */
@@ -70,6 +76,8 @@ extern void set_sp_module_record_wakeup_paras
 	(record_wakeup_paras_t __sp_module_record_wakeup_paras);
 extern void set_sp_module_record_cpus_allowed
 	(record_cpus_allowed_t __sp_module_record_cpus_allowed);
+extern void set_sp_module_forbid_task_cpu
+    (forbid_task_cpu_t __sp_module_forbit_task_cpu);
 
 static void rq_stats_do_work(struct seq_file *m, unsigned long iteration);
 
@@ -143,16 +151,27 @@ static void rq_stats_do_work(struct seq_file *m, unsigned long iteration)
 
 	if (entry->entry_type == WAKEUP_PARAS_SAMPLE)
 	{
-        seq_printf(m, " WAKEUP       %4d %4d %12d\n", 
+        seq_printf(m, " WAKEUP        %4d %4d %12d\n", 
                         entry->data.wakeup_paras_sample.cur_cpu,
                         entry->data.wakeup_paras_sample.on_rq,
                         entry->data.wakeup_paras_sample.parent_pid);
 	}
 	if (entry->entry_type == CPUS_ALLOWED_SAMPLE)
-	{	seq_printf(m, " ALLOWED_CPUS ");
+	{	seq_printf(m, " ALLOWED_CPUS  ");
 		for(i = 0; i < 64; i++) {
             if (entry->data.cpus_allowed_sample.cpus_in_mask[i] == -1) break;
             seq_printf(m, "%4d, ", entry->data.cpus_allowed_sample.cpus_in_mask[i]);
+        }
+		seq_printf(m, "\n");
+	}
+	if (entry->entry_type == FORBID_TASK_CPU_SAMPLE)
+	{
+		seq_printf(m, " FORBID_CPU_RET %4d\n", 
+		           entry->data.forbid_task_cpu_sample.ret);
+		seq_printf(m, " NEW_MASK       ");
+		for(i = 0; i < 64; i++) {
+            if (entry->data.forbid_task_cpu_sample.newmask[i] == -1) break;
+            seq_printf(m, "%4d, ", entry->data.forbid_task_cpu_sample.newmask[i]);
         }
 		seq_printf(m, "\n");
 	}
@@ -197,6 +216,7 @@ void sched_profiler_record_cpus_allowed(cpumask_t * m, int n_cpu) {
 	{
 		set_sp_module_record_wakeup_paras(NULL);
         set_sp_module_record_cpus_allowed(NULL);
+		set_sp_module_forbid_task_cpu(NULL);
 		return;
 	}
 
@@ -209,10 +229,35 @@ void sched_profiler_record_cpus_allowed(cpumask_t * m, int n_cpu) {
 }
 
 void sched_profiler_forbid_task_cpu(struct task_struct * p, int cpu) {
-	cpumask_t newmask;
+	static cpumask_t newmask;
+	unsigned long __current_sample_entry_id;
+	int r;
+
 	cpumask_copy(&newmask, &p->cpus_allowed);
-	cpumask_bits(&newmask)[cpu] = 0;
-	set_cpus_allowed_ptr(p, &newmask);
+	cpumask_clear_cpu(task_cpu(p), &newmask);
+	
+	r = set_cpus_allowed_ptr(p, &newmask);
+	
+
+	__current_sample_entry_id =
+		__sync_fetch_and_add(&current_sample_entry_id, 1);
+
+	if (__current_sample_entry_id >= MAX_SAMPLE_ENTRIES)
+	{
+		set_sp_module_record_wakeup_paras(NULL);
+        set_sp_module_record_cpus_allowed(NULL);
+		set_sp_module_forbid_task_cpu(NULL);
+		return;
+	}
+
+	sample_entries[__current_sample_entry_id]
+		 .sched_clock = ktime_get_mono_fast_ns();
+	sample_entries[__current_sample_entry_id]
+		 .entry_type = FORBID_TASK_CPU_SAMPLE;
+	sample_entries[__current_sample_entry_id].data
+		 .forbid_task_cpu_sample.ret = r;
+	sample_entries[__current_sample_entry_id].data
+		 .forbid_task_cpu_sample.newmask = sp_parse_cpumask(&newmask, 39);;
 }
 int init_module(void)
 {
@@ -232,6 +277,7 @@ int init_module(void)
 
 	set_sp_module_record_wakeup_paras(sched_profiler_record_wakeup_paras);
 	set_sp_module_record_cpus_allowed(sched_profiler_record_cpus_allowed);
+	set_sp_module_forbid_task_cpu(sched_profiler_forbid_task_cpu);
 
 	return 0;
 }
@@ -240,6 +286,7 @@ void cleanup_module(void)
 {
 	set_sp_module_record_wakeup_paras(NULL);
 	set_sp_module_record_cpus_allowed(NULL);
+	set_sp_module_forbid_task_cpu(NULL);
 
 	ssleep(1);
 
