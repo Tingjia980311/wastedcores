@@ -23,3 +23,5 @@ sched_wakeup/sched_profiler.ko
 sched_wakeup/sched_profiler.mod.c
 sched_wakeup/sched_profiler.mod.o
 sched_wakeup/sched_profiler.o
+*.out
+sched_wakeup/execute
